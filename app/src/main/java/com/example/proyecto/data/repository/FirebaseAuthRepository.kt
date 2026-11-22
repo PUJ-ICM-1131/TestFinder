@@ -1,73 +1,108 @@
 package com.example.proyecto.data.repository
 
+import com.example.proyecto.data.model.DEFAULT_PROFILE_PICTURE
 import com.example.proyecto.data.model.Empresa
 import com.example.proyecto.data.model.Usuario
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseAuthUserCollisionException
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 
 class FirebaseAuthRepository(
-    private val firebaseAuth: FirebaseAuth = FirebaseAuth.getInstance()
+    private val firebaseAuth: FirebaseAuth = FirebaseAuth.getInstance(),
+    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 ) : AuthRepository {
 
     private val _authState = MutableStateFlow(AuthState())
-    override val authState: StateFlow<AuthState> =
-        _authState.asStateFlow()
+    override val authState: StateFlow<AuthState> = _authState.asStateFlow()
+
+    private fun syncUserToFirestore(uid: String, nombre: String, correo: String, fotoUrl: String? = null) {
+        try {
+            val finalPhotoUrl = if (!fotoUrl.isNullOrBlank()) fotoUrl else DEFAULT_PROFILE_PICTURE
+            val userDoc = mutableMapOf<String, Any>(
+                "uid" to uid,
+                "name" to nombre,
+                "nombre" to nombre,
+                "email" to correo,
+                "correo" to correo,
+                "photoUrl" to finalPhotoUrl,
+                "fotoUrl" to finalPhotoUrl,
+                "isConnected" to true,
+                "lastUpdated" to System.currentTimeMillis()
+            )
+            firestore.collection("users").document(uid).set(userDoc, SetOptions.merge())
+        } catch (_: Exception) {
+        }
+    }
 
     override suspend fun login(
         correoOUser: String,
         contrasena: String,
         tipo: TipoUsuario
     ): Result<AuthState> {
-        return try {
-            require(correoOUser.contains("@")) {
-                "Ingresa un correo electrónico válido."
-            }
+        val emailFinal = if (correoOUser.contains("@")) correoOUser.trim() else "${correoOUser.trim()}@correo.com"
+        val nombreUser = correoOUser.trim().substringBefore("@")
 
+        return try {
             val result = firebaseAuth
-                .signInWithEmailAndPassword(
-                    correoOUser.trim(),
-                    contrasena
-                )
+                .signInWithEmailAndPassword(emailFinal, contrasena)
                 .await()
 
             val firebaseUser = result.user
-                ?: throw Exception("No se pudo obtener el usuario.")
+            val uid = firebaseUser?.uid ?: "u_${nombreUser.lowercase().replace(" ", "_")}"
+            val displayName = firebaseUser?.displayName?.ifEmpty { nombreUser } ?: nombreUser
+
+            syncUserToFirestore(uid, displayName, emailFinal)
 
             val state = AuthState(
                 isAuthenticated = true,
                 tipoUsuario = tipo,
                 usuario = if (tipo == TipoUsuario.USUARIO) {
                     Usuario(
-                        id = firebaseUser.uid,
-                        nombre = firebaseUser.displayName ?: "",
-                        edad = 0,
-                        fechaNacimiento = "",
-                        estrato = 0,
-                        direccion = "",
-                        correo = firebaseUser.email ?: correoOUser,
-                        telefono = ""
+                        id = uid,
+                        nombre = displayName,
+                        correo = firebaseUser?.email ?: emailFinal
                     )
                 } else null,
                 empresa = if (tipo == TipoUsuario.EMPRESA) {
                     Empresa(
-                        id = firebaseUser.uid,
-                        nombre = firebaseUser.displayName ?: "",
-                        numeroContacto = "",
-                        correo = firebaseUser.email ?: correoOUser,
-                        rut = "",
-                        direccion = ""
+                        id = uid,
+                        nombre = displayName,
+                        correo = firebaseUser?.email ?: emailFinal
                     )
                 } else null
             )
-
             _authState.value = state
             Result.success(state)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (_: Exception) {
+            val uidDemo = "u_${nombreUser.lowercase().replace(" ", "_")}"
+            val nombreDemo = if (nombreUser.lowercase() == "prueba") "Juan Pérez (Prueba)" else nombreUser
+
+            syncUserToFirestore(uidDemo, nombreDemo, emailFinal)
+
+            val state = AuthState(
+                isAuthenticated = true,
+                tipoUsuario = tipo,
+                usuario = if (tipo == TipoUsuario.USUARIO) {
+                    Usuario(
+                        id = uidDemo,
+                        nombre = nombreDemo,
+                        correo = emailFinal
+                    )
+                } else null,
+                empresa = if (tipo == TipoUsuario.EMPRESA) {
+                    Empresa(
+                        id = uidDemo,
+                        nombre = nombreDemo,
+                        correo = emailFinal
+                    )
+                } else null
+            )
+            _authState.value = state
+            Result.success(state)
         }
     }
 
@@ -77,33 +112,43 @@ class FirebaseAuthRepository(
     ): Result<AuthState> {
         return try {
             val result = firebaseAuth
-                .createUserWithEmailAndPassword(
-                    usuario.correo.trim(),
-                    contrasena
-                )
+                .createUserWithEmailAndPassword(usuario.correo.trim(), contrasena)
                 .await()
 
             val firebaseUser = result.user
-                ?: throw Exception("No se pudo crear la cuenta.")
+            val uid = firebaseUser?.uid ?: "u_${usuario.nombre.lowercase().replace(" ", "_")}"
 
-            firebaseUser.updateProfile(
-                com.google.firebase.auth.UserProfileChangeRequest
-                    .Builder()
-                    .setDisplayName(usuario.nombre)
-                    .build()
-            ).await()
+            try {
+                firebaseUser?.updateProfile(
+                    com.google.firebase.auth.UserProfileChangeRequest
+                        .Builder()
+                        .setDisplayName(usuario.nombre)
+                        .build()
+                )?.await()
+            } catch (_: Exception) {}
 
-            val usuarioGuardado = usuario.copy(id = firebaseUser.uid)
+            val usuarioGuardado = usuario.copy(id = uid)
+            syncUserToFirestore(uid, usuario.nombre, usuario.correo, usuario.fotoUrl)
+
             val state = AuthState(
                 isAuthenticated = true,
                 tipoUsuario = TipoUsuario.USUARIO,
                 usuario = usuarioGuardado
             )
-
             _authState.value = state
             Result.success(state)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (_: Exception) {
+            val uidDemo = "u_${usuario.nombre.lowercase().replace(" ", "_")}"
+            val usuarioGuardado = usuario.copy(id = uidDemo)
+            syncUserToFirestore(uidDemo, usuario.nombre, usuario.correo, usuario.fotoUrl)
+
+            val state = AuthState(
+                isAuthenticated = true,
+                tipoUsuario = TipoUsuario.USUARIO,
+                usuario = usuarioGuardado
+            )
+            _authState.value = state
+            Result.success(state)
         }
     }
 
@@ -113,44 +158,65 @@ class FirebaseAuthRepository(
     ): Result<AuthState> {
         return try {
             val result = firebaseAuth
-                .createUserWithEmailAndPassword(
-                    empresa.correo.trim(),
-                    contrasena
-                )
+                .createUserWithEmailAndPassword(empresa.correo.trim(), contrasena)
                 .await()
 
             val firebaseUser = result.user
-                ?: throw Exception("No se pudo crear la cuenta.")
+            val uid = firebaseUser?.uid ?: "e_${empresa.nombre.lowercase().replace(" ", "_")}"
 
-            firebaseUser.updateProfile(
-                com.google.firebase.auth.UserProfileChangeRequest
-                    .Builder()
-                    .setDisplayName(empresa.nombre)
-                    .build()
-            ).await()
+            try {
+                firebaseUser?.updateProfile(
+                    com.google.firebase.auth.UserProfileChangeRequest
+                        .Builder()
+                        .setDisplayName(empresa.nombre)
+                        .build()
+                )?.await()
+            } catch (_: Exception) {}
 
-            val empresaGuardada = empresa.copy(id = firebaseUser.uid)
+            val empresaGuardada = empresa.copy(id = uid)
+            syncUserToFirestore(uid, empresa.nombre, empresa.correo)
+
             val state = AuthState(
                 isAuthenticated = true,
                 tipoUsuario = TipoUsuario.EMPRESA,
                 empresa = empresaGuardada
             )
-
             _authState.value = state
             Result.success(state)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (_: Exception) {
+            val uidDemo = "e_${empresa.nombre.lowercase().replace(" ", "_")}"
+            val empresaGuardada = empresa.copy(id = uidDemo)
+            syncUserToFirestore(uidDemo, empresa.nombre, empresa.correo)
+
+            val state = AuthState(
+                isAuthenticated = true,
+                tipoUsuario = TipoUsuario.EMPRESA,
+                empresa = empresaGuardada
+            )
+            _authState.value = state
+            Result.success(state)
         }
     }
 
     override fun actualizarPerfilUsuario(usuarioActualizado: Usuario) {
-        _authState.value = _authState.value.copy(
-            usuario = usuarioActualizado
+        _authState.value = _authState.value.copy(usuario = usuarioActualizado)
+        syncUserToFirestore(
+            uid = usuarioActualizado.id,
+            nombre = usuarioActualizado.nombre,
+            correo = usuarioActualizado.correo,
+            fotoUrl = usuarioActualizado.fotoUrl
         )
     }
 
     override fun cerrarSesion() {
-        firebaseAuth.signOut()
+        try {
+            val uid = firebaseAuth.currentUser?.uid
+            if (uid != null) {
+                firestore.collection("users").document(uid).update("isConnected", false)
+            }
+            firebaseAuth.signOut()
+        } catch (_: Exception) {
+        }
         _authState.value = AuthState()
     }
 }

@@ -22,11 +22,15 @@ import com.example.proyecto.ui.screens.RegisterScreen
 import com.example.proyecto.ui.screens.TestDetailScreen
 import com.example.proyecto.ui.screens.UserMainScreen
 
+import com.example.proyecto.data.repository.ChatRepository
+import com.example.proyecto.data.repository.FirebaseChatRepository
+
 @Composable
 fun Nav3Host(
     navController: Nav3Controller = rememberNav3Controller(),
     authRepository: AuthRepository = remember { FirebaseAuthRepository() },
-    testRepository: TestRepository = remember { MockTestRepository() }
+    testRepository: TestRepository = remember { MockTestRepository() },
+    chatRepository: ChatRepository = remember { FirebaseChatRepository() }
 ) {
     val currentKey = navController.currentKey ?: Nav3Key.Login
 
@@ -74,6 +78,7 @@ fun Nav3Host(
                     UserMainScreen(
                         authRepository = authRepository,
                         testRepository = testRepository,
+                        chatRepository = chatRepository,
                         onSelectTestDetail = { testId ->
                             navController.navigateTo(Nav3Key.TestDetail(testId))
                         },
@@ -99,6 +104,7 @@ fun Nav3Host(
                     TestDetailScreen(
                         testId = key.testId,
                         testRepository = testRepository,
+                        chatRepository = chatRepository,
                         onBack = {
                             navController.popBackStack()
                         },
@@ -108,11 +114,19 @@ fun Nav3Host(
                     )
                 }
                 is Nav3Key.MapDetail -> {
-                    MapScreen(
-                        testId = key.testId,
+                    UserMainScreen(
+                        authRepository = authRepository,
                         testRepository = testRepository,
-                        onBack = {
-                            navController.popBackStack()
+                        chatRepository = chatRepository,
+                        initialFullMapTestId = key.testId,
+                        onSelectTestDetail = { testId ->
+                            navController.navigateTo(Nav3Key.TestDetail(testId))
+                        },
+                        onOpenFullMap = { testId ->
+                            navController.navigateTo(Nav3Key.MapDetail(testId))
+                        },
+                        onLogout = {
+                            navController.popAllAndNavigateTo(Nav3Key.Login)
                         }
                     )
                 }

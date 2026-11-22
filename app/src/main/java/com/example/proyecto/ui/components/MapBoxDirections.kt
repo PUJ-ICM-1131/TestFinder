@@ -79,9 +79,59 @@ suspend fun fetchMapboxRoute(
             distanceMeters = route.getDouble("distance"),
             durationSeconds = route.getDouble("duration")
         )
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         null
     } finally {
         connection?.disconnect()
     }
+}
+
+suspend fun fetchStreetRoute(
+    origin: com.google.android.gms.maps.model.LatLng,
+    dest: com.google.android.gms.maps.model.LatLng
+): List<com.google.android.gms.maps.model.LatLng> = withContext(Dispatchers.IO) {
+    val mapboxResult = fetchMapboxRoute(
+        originLat = origin.latitude,
+        originLng = origin.longitude,
+        destLat = dest.latitude,
+        destLng = dest.longitude
+    )
+    if (mapboxResult != null && mapboxResult.points.isNotEmpty()) {
+        return@withContext mapboxResult.points.map {
+            com.google.android.gms.maps.model.LatLng(it.latitude, it.longitude)
+        }
+    }
+
+    try {
+        val urlString = "https://router.project-osrm.org/route/v1/driving/" +
+                "${origin.longitude},${origin.latitude};${dest.longitude},${dest.latitude}" +
+                "?overview=full&geometries=geojson"
+        val connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 10000
+        }
+        if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+            val response = connection.inputStream.bufferedReader().use { it.readText() }
+            val json = JSONObject(response)
+            if (json.optString("code") == "Ok") {
+                val routes = json.getJSONArray("routes")
+                if (routes.length() > 0) {
+                    val route = routes.getJSONObject(0)
+                    val coordinates = route.getJSONObject("geometry").getJSONArray("coordinates")
+                    val points = mutableListOf<com.google.android.gms.maps.model.LatLng>()
+                    for (i in 0 until coordinates.length()) {
+                        val coord = coordinates.getJSONArray(i)
+                        points.add(com.google.android.gms.maps.model.LatLng(coord.getDouble(1), coord.getDouble(0)))
+                    }
+                    if (points.isNotEmpty()) {
+                        return@withContext points
+                    }
+                }
+            }
+        }
+    } catch (_: Exception) {
+    }
+
+    listOf(origin, dest)
 }

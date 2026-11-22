@@ -1,5 +1,12 @@
 package com.example.proyecto.ui.screens.tabs
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
@@ -26,6 +34,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -38,23 +47,34 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.proyecto.R
 import com.example.proyecto.data.model.Usuario
 import com.example.proyecto.data.repository.AuthRepository
+import com.example.proyecto.data.repository.CloudinaryUploader
+import com.example.proyecto.data.repository.LocationRepository
+import com.example.proyecto.ui.components.PhotoPickerDialog
+import kotlinx.coroutines.launch
 
 @Composable
 fun PerfilTab(
     authRepository: AuthRepository,
     onLogout: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val authState by authRepository.authState.collectAsState()
     val usuario = authState.usuario ?: Usuario()
 
@@ -65,8 +85,75 @@ fun PerfilTab(
     var direccion by remember(usuario) { mutableStateOf(usuario.direccion) }
     var correo by remember(usuario) { mutableStateOf(usuario.correo) }
     var telefono by remember(usuario) { mutableStateOf(usuario.telefono) }
+    var fotoUrl by remember(usuario) { mutableStateOf(usuario.fotoUrl) }
 
     var mensajeExito by remember { mutableStateOf(false) }
+    var showPhotoDialog by remember { mutableStateOf(false) }
+    var isUploadingPhoto by remember { mutableStateOf(false) }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            scope.launch {
+                try {
+                    isUploadingPhoto = true
+                    val secureUrl = CloudinaryUploader.uploadImage(context, it)
+                    fotoUrl = secureUrl
+                    val usuarioActualizado = usuario.copy(
+                        nombre = nombre,
+                        fotoUrl = secureUrl
+                    )
+                    authRepository.actualizarPerfilUsuario(usuarioActualizado)
+                    LocationRepository().updateLocation(
+                        uid = usuario.id,
+                        name = nombre.ifEmpty { "Usuario" },
+                        email = correo,
+                        lat = 4.6097,
+                        lng = -74.0817,
+                        photoUrl = secureUrl
+                    )
+                } catch (_: Exception) {
+                } finally {
+                    isUploadingPhoto = false
+                }
+            }
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: android.graphics.Bitmap? ->
+        bitmap?.let { b ->
+            scope.launch {
+                try {
+                    isUploadingPhoto = true
+                    val file = java.io.File(context.cacheDir, "temp_profile_${System.currentTimeMillis()}.jpg")
+                    file.outputStream().use { out ->
+                        b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
+                    }
+                    val secureUrl = CloudinaryUploader.uploadImage(context, Uri.fromFile(file))
+                    fotoUrl = secureUrl
+                    val usuarioActualizado = usuario.copy(
+                        nombre = nombre,
+                        fotoUrl = secureUrl
+                    )
+                    authRepository.actualizarPerfilUsuario(usuarioActualizado)
+                    LocationRepository().updateLocation(
+                        uid = usuario.id,
+                        name = nombre.ifEmpty { "Usuario" },
+                        email = correo,
+                        lat = 4.6097,
+                        lng = -74.0817,
+                        photoUrl = secureUrl
+                    )
+                } catch (_: Exception) {
+                } finally {
+                    isUploadingPhoto = false
+                }
+            }
+        }
+    }
 
     val defaultTitle = stringResource(R.string.profile_title)
 
@@ -77,21 +164,26 @@ fun PerfilTab(
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
+        Box(
             modifier = Modifier
                 .padding(vertical = 12.dp)
-                .size(76.dp)
+                .size(100.dp)
+                .clip(CircleShape)
+                .border(3.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                .clickable { showPhotoDialog = true },
+            contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.Person,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxSize()
-            )
+            if (isUploadingPhoto) {
+                CircularProgressIndicator(modifier = Modifier.size(36.dp))
+            } else {
+                val finalUrl = if (!fotoUrl.isNullOrBlank()) fotoUrl else com.example.proyecto.data.model.DEFAULT_PROFILE_PICTURE
+                AsyncImage(
+                    model = finalUrl,
+                    contentDescription = "Foto de Perfil",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         Text(
@@ -241,9 +333,20 @@ fun PerfilTab(
                             estrato = estrato.toInt(),
                             direccion = direccion,
                             correo = correo,
-                            telefono = telefono
+                            telefono = telefono,
+                            fotoUrl = fotoUrl
                         )
                         authRepository.actualizarPerfilUsuario(usuarioActualizado)
+                        scope.launch {
+                            LocationRepository().updateLocation(
+                                uid = usuario.id,
+                                name = nombre,
+                                email = correo,
+                                lat = 4.6097,
+                                lng = -74.0817,
+                                photoUrl = fotoUrl
+                            )
+                        }
                         mensajeExito = true
                     },
                     modifier = Modifier
@@ -277,5 +380,13 @@ fun PerfilTab(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+
+    if (showPhotoDialog) {
+        PhotoPickerDialog(
+            onDismissRequest = { showPhotoDialog = false },
+            onSelectCamera = { cameraLauncher.launch(null) },
+            onSelectGallery = { galleryLauncher.launch("image/*") }
+        )
     }
 }

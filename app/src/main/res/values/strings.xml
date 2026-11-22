@@ -72,10 +72,12 @@
     <string name="tab_explorar">Explorar</string>
     <string name="tab_historial">Historial</string>
     <string name="tab_en_curso">En Curso</string>
+    <string name="tab_chats">Chats</string>
     <string name="tab_perfil">Perfil</string>
     <string name="header_explorar">Explorar Tests</string>
     <string name="header_historial">Historial de Tests</string>
     <string name="header_en_curso">Tests en Curso y Mapa</string>
+    <string name="header_chats">Mis Chats y Amigos</string>
     <string name="header_perfil">Opciones de Perfil</string>
 
     <!-- Explorar Tab -->
@@ -113,6 +115,21 @@
     <string name="label_distance">Distancia aprox: 3.4 km</string>
     <string name="btn_stop_simulation">Detener simulación de velocidad alta</string>
     <string name="btn_test_speed_warning">Probar Alerta de Velocidad (Acelerómetro)</string>
+
+    <!-- Map Screen & Taller style -->
+    <string name="switch_connected">Conectado</string>
+    <string name="switch_disconnected">Desconectado</string>
+    <string name="location_status_on">Compartiendo ubicación en tiempo real</string>
+    <string name="location_status_off">Ubicación desconectada</string>
+    <string name="nav_drawer_title">Menú de Navegación</string>
+    <string name="menu_edit_profile">Editar Perfil</string>
+    <string name="menu_logout">Cerrar Sesión</string>
+    <string name="btn_open_realtime_map">Ver Mapa en Tiempo Real</string>
+    <string name="marker_title_you">%1$s (Tú)</string>
+    <string name="user_fallback">Usuario</string>
+    <string name="user_tester_fallback">Usuario Tester</string>
+    <string name="compass_description">Brújula</string>
+    <string name="driving_warning_msg">¡Alerta! No uses el celular mientras conduces.</string>
 
     <!-- Perfil Tab -->
     <string name="profile_title">Perfil de Usuario</string>

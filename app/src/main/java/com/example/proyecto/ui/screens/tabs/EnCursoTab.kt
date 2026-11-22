@@ -163,6 +163,21 @@ fun EnCursoTab(
             }
 
             inscripcionActual?.let { inscripcion ->
+                Button(
+                    onClick = { onOpenFullMap?.invoke(inscripcion.test.id) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Map, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.btn_open_realtime_map),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
                 MapboxMapView(
                     test = inscripcion.test,
                     sensorData = sensorData,

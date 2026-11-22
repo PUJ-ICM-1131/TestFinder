@@ -51,14 +51,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.proyecto.R
+import com.example.proyecto.data.model.Amigo
 import com.example.proyecto.data.model.Resena
+import com.example.proyecto.data.repository.ChatRepository
+import com.example.proyecto.data.repository.MockChatRepository
 import com.example.proyecto.data.repository.TestRepository
+import com.example.proyecto.ui.components.UserDetailDialog
+import androidx.compose.foundation.clickable
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TestDetailScreen(
     testId: String,
     testRepository: TestRepository,
+    chatRepository: ChatRepository = remember { MockChatRepository() },
     onBack: () -> Unit,
     onInscripcionExitosa: () -> Unit
 ) {
@@ -67,7 +73,9 @@ fun TestDetailScreen(
 
     var textoNuevaResena by remember { mutableStateOf("") }
     var calificacionResena by remember { mutableFloatStateOf(5.0f) }
+    var selectedUserForDialog by remember { mutableStateOf<Amigo?>(null) }
 
+    val amigos by chatRepository.amigos.collectAsState()
     val userPlaceholder = stringResource(R.string.review_user_placeholder)
 
     if (test == null) {
@@ -295,7 +303,13 @@ fun TestDetailScreen(
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 4.dp)
+                            .clickable {
+                                selectedUserForDialog = Amigo(
+                                    id = resena.id.ifEmpty { resena.usuarioNombre.lowercase().replace(" ", "_") },
+                                    nombre = resena.usuarioNombre
+                                )
+                            },
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
@@ -385,6 +399,23 @@ fun TestDetailScreen(
             }
 
             Spacer(modifier = Modifier.height(30.dp))
+        }
+
+        selectedUserForDialog?.let { amigo ->
+            val esAmigo = amigos.any { it.id == amigo.id }
+            UserDetailDialog(
+                usuarioId = amigo.id,
+                nombre = amigo.nombre,
+                fotoUrl = amigo.fotoUrl,
+                esAmigo = esAmigo,
+                onAgregarAmigo = { chatRepository.agregarAmigo(it) },
+                onIniciarChat = { amigoParaChat ->
+                    chatRepository.obtenerOCrearChatCon(amigoParaChat)
+                    selectedUserForDialog = null
+                    onBack()
+                },
+                onDismiss = { selectedUserForDialog = null }
+            )
         }
     }
 }
