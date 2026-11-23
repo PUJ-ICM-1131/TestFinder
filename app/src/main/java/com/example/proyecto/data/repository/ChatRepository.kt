@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 interface ChatRepository {
+    fun iniciarSesion(uid: String, nombre: String, fotoUrl: String? = null) {}
     val amigos: StateFlow<List<Amigo>>
     val chats: StateFlow<List<Chat>>
     val todosLosPerfiles: StateFlow<List<Amigo>>

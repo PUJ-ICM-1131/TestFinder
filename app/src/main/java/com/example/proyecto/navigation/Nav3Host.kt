@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import com.example.proyecto.data.repository.AuthRepository
@@ -32,6 +35,14 @@ fun Nav3Host(
     testRepository: TestRepository = remember { MockTestRepository() },
     chatRepository: ChatRepository = remember { FirebaseChatRepository() }
 ) {
+    val authState by authRepository.authState.collectAsState()
+    val sessionUid = authState.usuario?.id ?: authState.empresa?.id ?: ""
+    val sessionName = authState.usuario?.nombre ?: authState.empresa?.nombre ?: ""
+    val sessionPhoto = authState.usuario?.fotoUrl
+
+    LaunchedEffect(sessionUid, sessionName, sessionPhoto) {
+        chatRepository.iniciarSesion(sessionUid, sessionName, sessionPhoto)
+    }
     val currentKey = navController.currentKey ?: Nav3Key.Login
 
     Surface(

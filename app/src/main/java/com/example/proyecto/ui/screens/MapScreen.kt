@@ -100,6 +100,7 @@ fun MapScreen(
     authRepository: AuthRepository = remember { MockAuthRepository() },
     chatRepository: ChatRepository = remember { FirebaseChatRepository() },
     locationRepository: LocationRepository = remember { LocationRepository() },
+    onOpenChat: (chatId: String) -> Unit = {},   // <-- nuevo
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -139,7 +140,7 @@ fun MapScreen(
 
     val onlineUsersFlow = remember(locationRepository) { locationRepository.getOnlineUsers() }
     val onlineUsers by onlineUsersFlow.collectAsState(initial = emptyList())
-    
+
     val todosLosTests by testRepository.todosLosTests.collectAsState()
     val test = todosLosTests.find { it.id == testId } ?: todosLosTests.firstOrNull()
 
@@ -612,8 +613,8 @@ fun MapScreen(
             esAmigo = esAmigo,
             onAgregarAmigo = { chatRepository.agregarAmigo(it) },
             onIniciarChat = { amigoParaChat ->
-                chatRepository.obtenerOCrearChatCon(amigoParaChat)
-                onBack()
+                val chat = chatRepository.obtenerOCrearChatCon(amigoParaChat)
+                onOpenChat(chat.id)          // <-- en vez de onBack()
             },
             onDismiss = { targetUserForDialog = null }
         )

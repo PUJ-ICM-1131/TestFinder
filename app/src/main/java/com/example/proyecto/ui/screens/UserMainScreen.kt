@@ -117,6 +117,11 @@ fun UserMainScreen(
                     testRepository = testRepository,
                     authRepository = authRepository,
                     chatRepository = chatRepository,
+                    onOpenChat = { chatId ->
+                        targetChatIdToOpen = chatId
+                        selectedTabItem = 2            // pestaña Chats
+                        activeFullMapTestId = null     // sale del mapa
+                    },
                     onBack = { activeFullMapTestId = null }
                 )
             } else {

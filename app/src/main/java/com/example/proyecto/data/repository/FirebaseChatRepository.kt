@@ -1,10 +1,11 @@
 package com.example.proyecto.data.repository
 
+import android.util.Log
 import com.example.proyecto.data.model.Amigo
 import com.example.proyecto.data.model.Chat
 import com.example.proyecto.data.model.Mensaje
-import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,15 +13,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class FirebaseChatRepository(
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
-    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
+    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
 ) : ChatRepository {
 
-    private val currentUserUid: String
-        get() = auth.currentUser?.uid ?: "u1"
+    private companion object {
+        const val TAG = "FirebaseChatRepo"
+    }
 
-    private val currentUserName: String
-        get() = auth.currentUser?.displayName?.ifEmpty { "Yo" } ?: "Yo"
+    private var myUid: String = ""
+    private var myName: String = "Yo"
+    private var myPhoto: String? = null
 
     private val _amigos = MutableStateFlow<List<Amigo>>(emptyList())
     override val amigos: StateFlow<List<Amigo>> = _amigos.asStateFlow()
@@ -31,111 +33,186 @@ class FirebaseChatRepository(
     private val _chats = MutableStateFlow<List<Chat>>(emptyList())
     override val chats: StateFlow<List<Chat>> = _chats.asStateFlow()
 
-    init {
-        escucharChatsEnTiempoReal()
-        escucharUsuariosFirestore()
-        escucharAmigosEnTiempoReal()
+    private val listeners = mutableListOf<ListenerRegistration>()
+    private val messageListeners = mutableMapOf<String, ListenerRegistration>()
+
+    override fun iniciarSesion(uid: String, nombre: String, fotoUrl: String?) {
+        myName = nombre.ifBlank { "Yo" }
+        myPhoto = fotoUrl
+        if (uid == myUid) return
+
+        detenerListeners()
+        myUid = uid
+        _chats.value = emptyList()
+        _amigos.value = emptyList()
+        _todosLosPerfiles.value = emptyList()
+
+        if (uid.isBlank()) return
+        escucharChats()
+        escucharUsuarios()
+        escucharAmigos()
     }
 
-    private fun escucharUsuariosFirestore() {
-        try {
-            firestore.collection("users")
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    val perfilesDB = snapshot.documents.mapNotNull { doc ->
-                        val uid = doc.getString("uid") ?: doc.id
-                        if (uid == currentUserUid) return@mapNotNull null
-                        val name = doc.getString("name") ?: doc.getString("nombre") ?: return@mapNotNull null
-                        val email = doc.getString("email") ?: doc.getString("correo") ?: ""
-                        val photoUrl = doc.getString("photoUrl")
-                        Amigo(uid, name, email, photoUrl)
-                    }
-                    _todosLosPerfiles.value = perfilesDB
+    private fun detenerListeners() {
+        listeners.forEach { it.remove() }
+        listeners.clear()
+        messageListeners.values.forEach { it.remove() }
+        messageListeners.clear()
+    }
+
+    private fun escucharUsuarios() {
+        listeners += firestore.collection("users")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error escuchando users", error)
+                    return@addSnapshotListener
                 }
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun escucharAmigosEnTiempoReal() {
-        try {
-            val uid = currentUserUid
-            firestore.collection("users").document(uid).collection("amigos")
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    val amigosDB = snapshot.documents.mapNotNull { doc ->
-                        val amigoUid = doc.id
-                        val name = doc.getString("nombre") ?: "Amigo"
-                        val email = doc.getString("correo") ?: ""
-                        val photoUrl = doc.getString("fotoUrl")
-                        Amigo(amigoUid, name, email, photoUrl)
-                    }
-                    _amigos.value = amigosDB
+                if (snapshot == null) return@addSnapshotListener
+                _todosLosPerfiles.value = snapshot.documents.mapNotNull { doc ->
+                    val uid = doc.getString("uid") ?: doc.id
+                    if (uid == myUid) return@mapNotNull null
+                    val name = doc.getString("name") ?: doc.getString("nombre")
+                    ?: return@mapNotNull null
+                    Amigo(
+                        id = uid,
+                        nombre = name,
+                        correo = doc.getString("email") ?: doc.getString("correo") ?: "",
+                        fotoUrl = doc.getString("photoUrl") ?: doc.getString("fotoUrl")
+                    )
                 }
-        } catch (_: Exception) {
-        }
+            }
     }
 
-    private fun escucharChatsEnTiempoReal() {
-        try {
-            firestore.collection("chats")
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    val chatsActualizados = snapshot.documents.mapNotNull { doc ->
-                        val id = doc.id
-                        val amigoId = doc.getString("amigoId") ?: id
-                        val amigoNombre = doc.getString("amigoNombre") ?: "Usuario"
-                        val fotoUrl = doc.getString("fotoUrl")
-                        val ultimoMensaje = doc.getString("ultimoMensaje") ?: ""
-                        val fecha = doc.getString("fecha") ?: "Ahora"
+    private fun escucharAmigos() {
+        listeners += firestore.collection("users").document(myUid).collection("amigos")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error escuchando amigos", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) return@addSnapshotListener
+                _amigos.value = snapshot.documents.map { doc ->
+                    Amigo(
+                        id = doc.id,
+                        nombre = doc.getString("nombre") ?: "Amigo",
+                        correo = doc.getString("correo") ?: "",
+                        fotoUrl = doc.getString("fotoUrl")
+                    )
+                }
+            }
+    }
 
-                        val chatExistente = _chats.value.find { it.id == id }
-                        val chat = Chat(
-                            id = id,
-                            amigo = Amigo(amigoId, amigoNombre, "", fotoUrl),
-                            ultimoMensaje = ultimoMensaje,
-                            fechaUltimoMensaje = fecha,
-                            mensajes = chatExistente?.mensajes ?: emptyList()
+    private fun escucharChats() {
+        listeners += firestore.collection("chats")
+            .whereArrayContains("participants", myUid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error escuchando chats", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot == null) return@addSnapshotListener
+
+                val actuales = _chats.value.associateBy { it.id }
+
+                val lista = snapshot.documents
+                    .sortedByDescending { it.getLong("lastUpdated") ?: 0L }
+                    .map { doc ->
+                        val participants = (doc.get("participants") as? List<*>)
+                            ?.filterIsInstance<String>() ?: emptyList()
+                        val otroId = participants.firstOrNull { it != myUid } ?: ""
+
+                        @Suppress("UNCHECKED_CAST")
+                        val infoOtro = (doc.get("info") as? Map<String, Any?>)
+                            ?.get(otroId) as? Map<String, Any?>
+
+                        val legacyOk = doc.getString("amigoId") == otroId
+                        val nombre = (infoOtro?.get("nombre") as? String)
+                            ?: doc.getString("amigoNombre")?.takeIf { legacyOk }
+                            ?: "Usuario"
+                        val foto = (infoOtro?.get("fotoUrl") as? String)
+                            ?: doc.getString("fotoUrl")?.takeIf { legacyOk }
+
+                        escucharMensajes(doc.id)
+
+                        Chat(
+                            id = doc.id,
+                            amigo = Amigo(otroId, nombre, "", foto),
+                            ultimoMensaje = doc.getString("ultimoMensaje") ?: "",
+                            fechaUltimoMensaje = doc.getString("fecha") ?: "Ahora",
+                            mensajes = actuales[doc.id]?.mensajes ?: emptyList()
                         )
-                        escucharMensajesDeChat(id)
-                        chat
                     }
-                    _chats.value = chatsActualizados
+                _chats.value = lista
+            }
+    }
+
+    private fun escucharMensajes(chatId: String) {
+        if (messageListeners.containsKey(chatId)) return
+        messageListeners[chatId] = firestore.collection("chats").document(chatId)
+            .collection("messages")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(TAG, "Error escuchando mensajes de $chatId", error)
+                    return@addSnapshotListener
                 }
-        } catch (_: Exception) {
-        }
+                if (snapshot == null) return@addSnapshotListener
+                val mensajes = snapshot.documents.map { doc ->
+                    Mensaje(
+                        id = doc.id,
+                        emisorId = doc.getString("emisorId") ?: "",
+                        emisorNombre = doc.getString("emisorNombre") ?: "",
+                        texto = doc.getString("texto") ?: "",
+                        timestamp = doc.getLong("timestamp") ?: System.currentTimeMillis()
+                    )
+                }
+                _chats.value = _chats.value.map { chat ->
+                    if (chat.id == chatId) {
+                        chat.copy(
+                            mensajes = mensajes,
+                            ultimoMensaje = mensajes.lastOrNull()?.texto ?: chat.ultimoMensaje
+                        )
+                    } else chat
+                }
+            }
     }
 
     override fun agregarAmigo(amigo: Amigo) {
+        if (myUid.isBlank()) return
         if (_amigos.value.none { it.id == amigo.id }) {
             _amigos.value = _amigos.value + amigo
         }
-        try {
-            val uid = currentUserUid
-            val amigoData = mapOf(
-                "id" to amigo.id,
-                "nombre" to amigo.nombre,
-                "correo" to amigo.correo,
-                "fotoUrl" to amigo.fotoUrl,
-                "timestamp" to System.currentTimeMillis()
+        firestore.collection("users").document(myUid)
+            .collection("amigos").document(amigo.id)
+            .set(
+                mapOf(
+                    "id" to amigo.id,
+                    "nombre" to amigo.nombre,
+                    "correo" to amigo.correo,
+                    "fotoUrl" to amigo.fotoUrl,
+                    "timestamp" to System.currentTimeMillis()
+                ),
+                SetOptions.merge()
             )
-            firestore.collection("users").document(uid).collection("amigos").document(amigo.id)
-                .set(amigoData, SetOptions.merge())
-        } catch (_: Exception) {
-        }
+            .addOnFailureListener { Log.e(TAG, "No se pudo agregar amigo", it) }
     }
 
-    override fun esAmigo(usuarioId: String): Boolean {
-        return _amigos.value.any { it.id == usuarioId }
-    }
+    override fun esAmigo(usuarioId: String): Boolean =
+        _amigos.value.any { it.id == usuarioId }
 
     override fun obtenerOCrearChatCon(amigo: Amigo): Chat {
-        val chatExistente = _chats.value.find { it.amigo.id == amigo.id }
-        if (chatExistente != null) {
-            return chatExistente
+        val chatId = if (myUid < amigo.id) "chat_${myUid}_${amigo.id}" else "chat_${amigo.id}_${myUid}"
+        Log.d(TAG, "obtenerOCrearChatCon: myUid='$myUid' amigo='${amigo.id}' chatId='$chatId'")
+
+        if (myUid.isBlank()) {
+            Log.e(TAG, "myUid está vacío: falta llamar a chatRepository.iniciarSesion(...) tras el login (ver Nav3Host)")
+            return Chat(id = chatId, amigo = amigo, ultimoMensaje = "", fechaUltimoMensaje = "Ahora")
         }
 
-        val myUid = currentUserUid
-        val chatId = if (myUid < amigo.id) "chat_${myUid}_${amigo.id}" else "chat_${amigo.id}_${myUid}"
+        _chats.value.find { it.id == chatId }?.let {
+            Log.d(TAG, "El chat $chatId ya existía localmente; no se vuelve a escribir")
+            return it
+        }
 
         val nuevoChat = Chat(
             id = chatId,
@@ -146,102 +223,56 @@ class FirebaseChatRepository(
         )
         _chats.value = _chats.value + nuevoChat
         agregarAmigo(amigo)
+        escucharMensajes(chatId)
 
-        escucharMensajesDeChat(chatId)
-
-        try {
-            val chatData = mapOf(
-                "id" to chatId,
-                "participants" to listOf(myUid, amigo.id),
-                "amigoId" to amigo.id,
-                "amigoNombre" to amigo.nombre,
-                "fotoUrl" to amigo.fotoUrl,
-                "ultimoMensaje" to "Conversación iniciada",
-                "fecha" to "Ahora",
-                "lastUpdated" to System.currentTimeMillis()
-            )
-            firestore.collection("chats").document(chatId).set(chatData, SetOptions.merge())
-        } catch (_: Exception) {
-        }
-
-        return nuevoChat
-    }
-
-    private fun escucharMensajesDeChat(chatId: String) {
-        try {
-            firestore.collection("chats").document(chatId)
-                .collection("messages")
-                .orderBy("timestamp", Query.Direction.ASCENDING)
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null) return@addSnapshotListener
-                    val mensajes = snapshot.documents.mapNotNull { doc ->
-                        val emisorId = doc.getString("emisorId") ?: ""
-                        val emisorNombre = doc.getString("emisorNombre") ?: ""
-                        val texto = doc.getString("texto") ?: ""
-                        val ts = doc.getLong("timestamp") ?: System.currentTimeMillis()
-                        Mensaje(doc.id, emisorId, emisorNombre, texto, ts)
-                    }
-                    if (mensajes.isNotEmpty()) {
-                        _chats.value = _chats.value.map { chat ->
-                            if (chat.id == chatId) {
-                                chat.copy(
-                                    mensajes = mensajes,
-                                    ultimoMensaje = mensajes.lastOrNull()?.texto ?: chat.ultimoMensaje
-                                )
-                            } else {
-                                chat
-                            }
-                        }
-                    }
-                }
-        } catch (_: Exception) {
-        }
-    }
-
-    override fun enviarMensaje(chatId: String, texto: String, emisorId: String, emisorNombre: String) {
-        if (texto.isBlank()) return
-        val senderId = if (emisorId.isNotBlank() && emisorId != "u1") emisorId else currentUserUid
-        val senderName = if (emisorNombre.isNotBlank() && emisorNombre != "Yo") emisorNombre else currentUserName
-
-        val nuevoMensaje = Mensaje(
-            id = "m_${System.currentTimeMillis()}",
-            emisorId = senderId,
-            emisorNombre = senderName,
-            texto = texto.trim(),
-            timestamp = System.currentTimeMillis()
-        )
-
-        _chats.value = _chats.value.map { chat ->
-            if (chat.id == chatId) {
-                chat.copy(
-                    ultimoMensaje = texto.trim(),
-                    fechaUltimoMensaje = "Ahora",
-                    mensajes = chat.mensajes + nuevoMensaje
-                )
-            } else {
-                chat
-            }
-        }
-
-        try {
-            val msgData = mapOf(
-                "emisorId" to senderId,
-                "emisorNombre" to senderName,
-                "texto" to texto.trim(),
-                "timestamp" to System.currentTimeMillis()
-            )
-            firestore.collection("chats").document(chatId)
-                .collection("messages").document(nuevoMensaje.id).set(msgData, SetOptions.merge())
-
-            firestore.collection("chats").document(chatId).set(
+        firestore.collection("chats").document(chatId)
+            .set(
                 mapOf(
-                    "ultimoMensaje" to texto.trim(),
-                    "fecha" to "Ahora",
+                    "id" to chatId,
+                    "participants" to listOf(myUid, amigo.id),
+                    "info" to mapOf(
+                        myUid to mapOf("nombre" to myName, "fotoUrl" to myPhoto),
+                        amigo.id to mapOf("nombre" to amigo.nombre, "fotoUrl" to amigo.fotoUrl)
+                    ),
                     "lastUpdated" to System.currentTimeMillis()
                 ),
                 SetOptions.merge()
             )
-        } catch (_: Exception) {
-        }
+            .addOnSuccessListener { Log.d(TAG, "Chat $chatId creado en Firestore") }
+            .addOnFailureListener { Log.e(TAG, "No se pudo crear el chat $chatId", it) }
+
+        return nuevoChat
+    }
+
+    override fun enviarMensaje(chatId: String, texto: String, emisorId: String, emisorNombre: String) {
+        val limpio = texto.trim()
+        if (limpio.isEmpty() || myUid.isBlank()) return
+
+        val chatRef = firestore.collection("chats").document(chatId)
+        val msgRef = chatRef.collection("messages").document()
+        val ahora = System.currentTimeMillis()
+
+        firestore.batch().apply {
+            set(
+                msgRef,
+                mapOf(
+                    "emisorId" to myUid,
+                    "emisorNombre" to myName,
+                    "texto" to limpio,
+                    "timestamp" to ahora
+                )
+            )
+            set(
+                chatRef,
+                mapOf(
+                    "ultimoMensaje" to limpio,
+                    "fecha" to "Ahora",
+                    "lastUpdated" to ahora
+                ),
+                SetOptions.merge()
+            )
+        }.commit()
+            .addOnSuccessListener { Log.d(TAG, "Mensaje enviado a $chatId") }
+            .addOnFailureListener { Log.e(TAG, "No se pudo enviar el mensaje a $chatId", it) }
     }
 }

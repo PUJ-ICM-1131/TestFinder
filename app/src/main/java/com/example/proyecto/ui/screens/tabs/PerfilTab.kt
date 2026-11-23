@@ -1,9 +1,9 @@
 package com.example.proyecto.ui.screens.tabs
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -23,7 +23,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
@@ -39,7 +38,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -87,37 +85,18 @@ fun PerfilTab(
     var telefono by remember(usuario) { mutableStateOf(usuario.telefono) }
     var fotoUrl by remember(usuario) { mutableStateOf(usuario.fotoUrl) }
 
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var mensajeExito by remember { mutableStateOf(false) }
     var showPhotoDialog by remember { mutableStateOf(false) }
-    var isUploadingPhoto by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
-            scope.launch {
-                try {
-                    isUploadingPhoto = true
-                    val secureUrl = CloudinaryUploader.uploadImage(context, it)
-                    fotoUrl = secureUrl
-                    val usuarioActualizado = usuario.copy(
-                        nombre = nombre,
-                        fotoUrl = secureUrl
-                    )
-                    authRepository.actualizarPerfilUsuario(usuarioActualizado)
-                    LocationRepository().updateLocation(
-                        uid = usuario.id,
-                        name = nombre.ifEmpty { "Usuario" },
-                        email = correo,
-                        lat = 4.6097,
-                        lng = -74.0817,
-                        photoUrl = secureUrl
-                    )
-                } catch (_: Exception) {
-                } finally {
-                    isUploadingPhoto = false
-                }
-            }
+            selectedImageUri = it
+            fotoUrl = it.toString()
+            mensajeExito = false
         }
     }
 
@@ -127,29 +106,9 @@ fun PerfilTab(
         contract = ActivityResultContracts.TakePicture()
     ) { success: Boolean ->
         if (success && tempPhotoUri != null) {
-            scope.launch {
-                try {
-                    isUploadingPhoto = true
-                    val secureUrl = CloudinaryUploader.uploadImage(context, tempPhotoUri!!)
-                    fotoUrl = secureUrl
-                    val usuarioActualizado = usuario.copy(
-                        nombre = nombre,
-                        fotoUrl = secureUrl
-                    )
-                    authRepository.actualizarPerfilUsuario(usuarioActualizado)
-                    LocationRepository().updateLocation(
-                        uid = usuario.id,
-                        name = nombre.ifEmpty { "Usuario" },
-                        email = correo,
-                        lat = 4.6097,
-                        lng = -74.0817,
-                        photoUrl = secureUrl
-                    )
-                } catch (_: Exception) {
-                } finally {
-                    isUploadingPhoto = false
-                }
-            }
+            selectedImageUri = tempPhotoUri
+            fotoUrl = tempPhotoUri.toString()
+            mensajeExito = false
         }
     }
 
@@ -166,7 +125,7 @@ fun PerfilTab(
             tempPhotoUri = uri
             takePictureLauncher.launch(uri)
         } else {
-            android.widget.Toast.makeText(context, "Permiso de cámara denegado", android.widget.Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Permiso de cámara denegado", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -207,7 +166,7 @@ fun PerfilTab(
                 .clickable { showPhotoDialog = true },
             contentAlignment = Alignment.Center
         ) {
-            if (isUploadingPhoto) {
+            if (isSaving) {
                 CircularProgressIndicator(modifier = Modifier.size(36.dp))
             } else {
                 val finalUrl = if (!fotoUrl.isNullOrBlank()) fotoUrl else com.example.proyecto.data.model.DEFAULT_PROFILE_PICTURE
@@ -360,37 +319,71 @@ fun PerfilTab(
 
                 Button(
                     onClick = {
-                        val usuarioActualizado = usuario.copy(
-                            nombre = nombre,
-                            edad = edad.toIntOrNull() ?: usuario.edad,
-                            fechaNacimiento = fechaNacimiento,
-                            estrato = estrato.toInt(),
-                            direccion = direccion,
-                            correo = correo,
-                            telefono = telefono,
-                            fotoUrl = fotoUrl
-                        )
-                        authRepository.actualizarPerfilUsuario(usuarioActualizado)
                         scope.launch {
-                            LocationRepository().updateLocation(
-                                uid = usuario.id,
-                                name = nombre,
-                                email = correo,
-                                lat = 4.6097,
-                                lng = -74.0817,
-                                photoUrl = fotoUrl
-                            )
+                            try {
+                                isSaving = true
+                                var finalUrl = fotoUrl
+
+                                val uriToUpload = selectedImageUri ?: if (!finalUrl.isNullOrBlank() && (finalUrl.startsWith("content://") || finalUrl.startsWith("file://"))) {
+                                    Uri.parse(finalUrl)
+                                } else null
+
+                                if (uriToUpload != null) {
+                                    finalUrl = CloudinaryUploader.uploadImage(context, uriToUpload)
+                                    fotoUrl = finalUrl
+                                    selectedImageUri = null
+                                }
+
+                                val usuarioActualizado = usuario.copy(
+                                    nombre = nombre,
+                                    edad = edad.toIntOrNull() ?: usuario.edad,
+                                    fechaNacimiento = fechaNacimiento,
+                                    estrato = estrato.toInt(),
+                                    direccion = direccion,
+                                    correo = correo,
+                                    telefono = telefono,
+                                    fotoUrl = finalUrl
+                                )
+
+                                authRepository.actualizarPerfilUsuario(usuarioActualizado)
+
+                                LocationRepository().updateLocation(
+                                    uid = usuario.id,
+                                    name = nombre.ifEmpty { "Usuario" },
+                                    email = correo,
+                                    lat = 4.6097,
+                                    lng = -74.0817,
+                                    photoUrl = finalUrl
+                                )
+
+                                mensajeExito = true
+                                Toast.makeText(context, "Perfil guardado y foto subida a Cloudinary", Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Error al subir foto a Cloudinary: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                            } finally {
+                                isSaving = false
+                            }
                         }
-                        mensajeExito = true
                     },
+                    enabled = !isSaving,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(stringResource(R.string.btn_save_changes), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Guardando en Cloudinary...", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(stringResource(R.string.btn_save_changes), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
