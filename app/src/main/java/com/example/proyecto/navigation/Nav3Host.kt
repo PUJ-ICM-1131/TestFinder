@@ -94,6 +94,8 @@ fun Nav3Host(
                 is Nav3Key.EmpresaWelcome -> {
                     EmpresaWelcomeScreen(
                         authRepository = authRepository,
+                        testRepository = testRepository,
+                        chatRepository = chatRepository,
                         onLogout = {
                             navController.popAllAndNavigateTo(Nav3Key.Login)
                         }

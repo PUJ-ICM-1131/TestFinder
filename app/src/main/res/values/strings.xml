@@ -50,6 +50,7 @@
     <string name="empresa_address_label">Dirección: %1$s</string>
     <string name="empresa_status_title">Estado del Servicio</string>
     <string name="empresa_status_subtitle">3 tests activos publicados en la plataforma</string>
+    <string name="btn_empresa_chats">Mensajes con Usuarios</string>
 
     <!-- Test Detail Screen -->
     <string name="test_detail_title">Detalles del Test</string>

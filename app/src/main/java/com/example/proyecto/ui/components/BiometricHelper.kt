@@ -14,42 +14,54 @@ fun showBiometricPrompt(
     onError: (String) -> Unit
 ) {
     val biometricManager = BiometricManager.from(activity)
-    val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK
 
-    when (biometricManager.canAuthenticate(authenticators)) {
-        BiometricManager.BIOMETRIC_SUCCESS -> {
-            val executor = ContextCompat.getMainExecutor(activity)
-            val biometricPrompt = BiometricPrompt(
-                activity,
-                executor,
-                object : BiometricPrompt.AuthenticationCallback() {
-                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                        super.onAuthenticationSucceeded(result)
-                        onSuccess()
-                    }
+    var authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK
+    var canAuth = biometricManager.canAuthenticate(authenticators)
 
-                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                        super.onAuthenticationError(errorCode, errString)
-                        onError(errString.toString())
-                    }
+    var allowDeviceCredential = false
+    if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
+        authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        canAuth = biometricManager.canAuthenticate(authenticators)
+        if (canAuth == BiometricManager.BIOMETRIC_SUCCESS) {
+            allowDeviceCredential = true
+        }
+    }
 
-                    override fun onAuthenticationFailed() {
-                        super.onAuthenticationFailed()
-                        onError("Huella no reconocida. Intenta de nuevo.")
-                    }
+    if (canAuth == BiometricManager.BIOMETRIC_SUCCESS) {
+        val executor = ContextCompat.getMainExecutor(activity)
+        val biometricPrompt = BiometricPrompt(
+            activity,
+            executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    onSuccess()
                 }
-            )
 
-            val promptInfo = BiometricPrompt.PromptInfo.Builder()
-                .setTitle(title)
-                .setSubtitle(subtitle)
-                .setNegativeButtonText(negativeButtonText)
-                .build()
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    onError(errString.toString())
+                }
 
-            biometricPrompt.authenticate(promptInfo)
+                override fun onAuthenticationFailed() {
+                    super.onAuthenticationFailed()
+                    onError("Huella no reconocida. Intenta de nuevo.")
+                }
+            }
+        )
+
+        val promptBuilder = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(title)
+            .setSubtitle(subtitle)
+
+        if (allowDeviceCredential) {
+            promptBuilder.setAllowedAuthenticators(authenticators)
+        } else {
+            promptBuilder.setNegativeButtonText(negativeButtonText)
         }
-        else -> {
-            onError("Biometría no disponible o no configurada en este dispositivo.")
-        }
+
+        biometricPrompt.authenticate(promptBuilder.build())
+    } else {
+        onError("La autenticación biométrica o del dispositivo no está disponible en este equipo.")
     }
 }

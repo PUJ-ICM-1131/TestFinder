@@ -132,11 +132,18 @@ fun UserMainScreen(
                             onOpenFullMap(testId)
                         }
                     )
-                    2 -> ChatsTab(
-                        chatRepository = chatRepository,
-                        selectedChatId = targetChatIdToOpen,
-                        onChatClosed = { targetChatIdToOpen = null }
-                    )
+                    2 -> {
+                        val authState by authRepository.authState.collectAsState()
+                        val userUid = authState.usuario?.id ?: "u1"
+                        val userName = authState.usuario?.nombre ?: "Yo"
+                        ChatsTab(
+                            chatRepository = chatRepository,
+                            currentUserId = userUid,
+                            currentUserName = userName,
+                            selectedChatId = targetChatIdToOpen,
+                            onChatClosed = { targetChatIdToOpen = null }
+                        )
+                    }
                     3 -> HistorialTab(
                         testRepository = testRepository
                     )

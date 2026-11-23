@@ -57,7 +57,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 
-const val MAPBOX_ACCESS_TOKEN: String = ""
+val MAPBOX_ACCESS_TOKEN: String = com.example.proyecto.BuildConfig.MAPBOX_ACCESS_TOKEN
 
 @Composable
 fun MapboxMapView(

@@ -58,24 +58,29 @@ object CustomMarkerHelper {
         val innerRadius = radius - borderSize
         canvas.drawCircle(center, center, innerRadius, paint)
 
-        var profileBitmap: Bitmap? = null
         val finalImageUrl = if (!imageUrl.isNullOrBlank()) imageUrl else com.example.proyecto.data.model.DEFAULT_PROFILE_PICTURE
-        try {
-            val loader = ImageLoader(context)
-            val request = ImageRequest.Builder(context)
-                .data(finalImageUrl)
-                .allowHardware(false)
-                .build()
-            val result = (loader.execute(request) as? SuccessResult)?.drawable
-            profileBitmap = result?.toBitmap(
-                width = (innerRadius * 2).toInt(),
-                height = (innerRadius * 2).toInt()
-            )
+        val loadedBitmap: Bitmap? = try {
+            kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                val request = ImageRequest.Builder(context)
+                    .data(finalImageUrl)
+                    .allowHardware(false)
+                    .size((innerRadius * 2).toInt(), (innerRadius * 2).toInt())
+                    .scale(coil.size.Scale.FILL)
+                    .build()
+                val result = ImageLoader(context).execute(request)
+                if (result is SuccessResult) {
+                    result.drawable.toBitmap(
+                        width = (innerRadius * 2).toInt(),
+                        height = (innerRadius * 2).toInt()
+                    )
+                } else null
+            }
         } catch (_: Exception) {
+            null
         }
 
-        if (profileBitmap != null) {
-            val circularBitmap = getCircularBitmap(profileBitmap)
+        if (loadedBitmap != null) {
+            val circularBitmap = getCircularBitmap(loadedBitmap)
             canvas.drawBitmap(
                 circularBitmap,
                 center - innerRadius,

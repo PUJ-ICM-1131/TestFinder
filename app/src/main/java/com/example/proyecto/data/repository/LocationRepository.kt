@@ -20,16 +20,43 @@ class LocationRepository(
                     trySend(emptyList())
                     return@addSnapshotListener
                 }
-                val now = System.currentTimeMillis()
                 val users = snapshot.documents.mapNotNull { doc ->
                     try {
-                        val user = doc.toObject(UserLocation::class.java)
-                        if (user != null && user.latitude != null && user.longitude != null) {
-                            val diff = Math.abs(now - user.lastUpdated)
-                            val isRecent = diff < 24 * 60 * 60 * 1000L
-                            if (user.isConnected || isRecent) {
-                                user
-                            } else null
+                        val rawUser = doc.toObject(UserLocation::class.java)
+                        val uid = if (rawUser != null && rawUser.uid.isNotBlank()) rawUser.uid else doc.id
+                        val lat = rawUser?.latitude ?: parseDouble(doc, "latitude", "lat")
+                        val lng = rawUser?.longitude ?: parseDouble(doc, "longitude", "lng")
+
+                        if (lat != null && lng != null) {
+                            val name = rawUser?.name?.takeIf { it.isNotBlank() }
+                                ?: doc.getString("name")
+                                ?: doc.getString("nombre")
+                                ?: "Usuario"
+
+                            val email = rawUser?.email?.takeIf { it.isNotBlank() }
+                                ?: doc.getString("email")
+                                ?: doc.getString("correo")
+                                ?: ""
+
+                            val photoUrl = rawUser?.photoUrl?.takeIf { it.isNotBlank() }
+                                ?: doc.getString("photoUrl")
+                                ?: doc.getString("fotoUrl")
+
+                            val isConn = parseBoolean(doc, "isConnected", "connected")
+                                ?: (rawUser?.isConnected == true)
+
+                            if (!isConn) return@mapNotNull null
+
+                            UserLocation(
+                                uid = uid,
+                                name = name,
+                                email = email,
+                                photoUrl = photoUrl,
+                                latitude = lat,
+                                longitude = lng,
+                                isConnected = isConn,
+                                lastUpdated = rawUser?.lastUpdated ?: doc.getLong("lastUpdated") ?: System.currentTimeMillis()
+                            )
                         } else null
                     } catch (_: Exception) {
                         null
@@ -57,10 +84,14 @@ class LocationRepository(
                 "latitude" to lat,
                 "longitude" to lng,
                 "isConnected" to true,
+                "connected" to true,
                 "locationHistory" to FieldValue.arrayUnion(point),
                 "lastUpdated" to System.currentTimeMillis()
             )
-            photoUrl?.let { updates["photoUrl"] = it }
+            photoUrl?.let {
+                updates["photoUrl"] = it
+                updates["fotoUrl"] = it
+            }
 
             firestore.collection("users").document(uid)
                 .set(updates, SetOptions.merge()).await()
@@ -72,22 +103,37 @@ class LocationRepository(
 
     suspend fun setConnectedState(uid: String, isConnected: Boolean): Result<Unit> {
         return try {
-            val updates = if (isConnected) {
-                mapOf<String, Any>(
-                    "isConnected" to true,
-                    "lastUpdated" to System.currentTimeMillis()
-                )
-            } else {
-                mapOf<String, Any>(
-                    "isConnected" to false,
-                    "lastUpdated" to System.currentTimeMillis()
-                )
-            }
+            val updates = mapOf<String, Any>(
+                "isConnected" to isConnected,
+                "connected" to isConnected,
+                "lastUpdated" to System.currentTimeMillis()
+            )
             firestore.collection("users").document(uid)
                 .set(updates, SetOptions.merge()).await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private fun parseDouble(doc: com.google.firebase.firestore.DocumentSnapshot, vararg keys: String): Double? {
+        for (key in keys) {
+            val valObj = doc.get(key)
+            if (valObj is Number) return valObj.toDouble()
+            if (valObj is String) {
+                val d = valObj.toDoubleOrNull()
+                if (d != null) return d
+            }
+        }
+        return null
+    }
+
+    private fun parseBoolean(doc: com.google.firebase.firestore.DocumentSnapshot, vararg keys: String): Boolean? {
+        for (key in keys) {
+            val valObj = doc.get(key)
+            if (valObj is Boolean) return valObj
+            if (valObj is String) return valObj.toBooleanStrictOrNull()
+        }
+        return null
     }
 }

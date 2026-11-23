@@ -31,6 +31,7 @@ class FirebaseAuthRepository(
                 "photoUrl" to finalPhotoUrl,
                 "fotoUrl" to finalPhotoUrl,
                 "isConnected" to true,
+                "connected" to true,
                 "lastUpdated" to System.currentTimeMillis()
             )
             firestore.collection("users").document(uid).set(userDoc, SetOptions.merge())
@@ -212,7 +213,12 @@ class FirebaseAuthRepository(
         try {
             val uid = firebaseAuth.currentUser?.uid
             if (uid != null) {
-                firestore.collection("users").document(uid).update("isConnected", false)
+                firestore.collection("users").document(uid).update(
+                    mapOf(
+                        "isConnected" to false,
+                        "connected" to false
+                    )
+                )
             }
             firebaseAuth.signOut()
         } catch (_: Exception) {

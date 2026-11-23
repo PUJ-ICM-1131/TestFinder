@@ -103,22 +103,28 @@ fun LoginScreen(
         }
     }
 
+    val requerirAutenticacionBiometrica = false
+
     val triggerBiometricAuth = {
-        val activity = context as? FragmentActivity
-        if (activity != null) {
-            showBiometricPrompt(
-                activity = activity,
-                onSuccess = {
-                    huellaVerificada = true
-                    performLogin()
-                },
-                onError = { err ->
-                    errorMessage = "Atención con la huella: $err. Intentando autenticar..."
-                    performLogin()
-                }
-            )
-        } else {
+        if (!requerirAutenticacionBiometrica) {
             performLogin()
+        } else {
+            val activity = context as? FragmentActivity
+            if (activity != null) {
+                showBiometricPrompt(
+                    activity = activity,
+                    onSuccess = {
+                        huellaVerificada = true
+                        performLogin()
+                    },
+                    onError = { err ->
+                        huellaVerificada = false
+                        errorMessage = "Autenticación biométrica requerida. Error: $err"
+                    }
+                )
+            } else {
+                errorMessage = "No se pudo iniciar la autenticación biométrica."
+            }
         }
     }
 

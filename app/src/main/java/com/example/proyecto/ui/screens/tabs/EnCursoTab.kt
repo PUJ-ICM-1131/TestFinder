@@ -1,8 +1,9 @@
 package com.example.proyecto.ui.screens.tabs
 
-import android.graphics.BitmapFactory
 import android.net.Uri
-import androidx.compose.foundation.Image
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,10 +27,10 @@ import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -40,22 +41,25 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.proyecto.MainActivity
+import coil.compose.AsyncImage
 import com.example.proyecto.R
+import com.example.proyecto.data.repository.CloudinaryUploader
 import com.example.proyecto.data.repository.TestRepository
 import com.example.proyecto.ui.components.MapboxMapView
+import com.example.proyecto.ui.components.PhotoPickerDialog
 import com.example.proyecto.ui.components.rememberSensorDataState
+import kotlinx.coroutines.launch
 
 @Composable
 fun EnCursoTab(
@@ -63,12 +67,89 @@ fun EnCursoTab(
     onOpenFullMap: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
     val inscripciones by testRepository.inscripcionesEnCurso.collectAsState()
     var inscripcionSeleccionadaId by remember { mutableStateOf<String?>(null) }
+    var isUploadingEvidence by remember { mutableStateOf(false) }
 
     val sensorData = rememberSensorDataState()
 
     val inscripcionActual = inscripciones.find { it.id == inscripcionSeleccionadaId } ?: inscripciones.firstOrNull()
+
+    var showPhotoPicker by remember { mutableStateOf(false) }
+    var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
+
+    fun uploadEvidenceToCloudinary(uri: Uri, inscripcionId: String) {
+        scope.launch {
+            try {
+                isUploadingEvidence = true
+                val secureUrl = CloudinaryUploader.uploadImage(context, uri)
+                testRepository.agregarEvidencia(inscripcionId, secureUrl)
+                Toast.makeText(context, "Evidencia guardada exitosamente en Cloudinary", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error al subir evidencia: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+            } finally {
+                isUploadingEvidence = false
+            }
+        }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let { selectedUri ->
+            inscripcionActual?.let { insc ->
+                uploadEvidenceToCloudinary(selectedUri, insc.id)
+            }
+        }
+    }
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        if (success && tempPhotoUri != null) {
+            inscripcionActual?.let { insc ->
+                uploadEvidenceToCloudinary(tempPhotoUri!!, insc.id)
+            }
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            val photoFile = java.io.File(context.cacheDir, "evidence_photo_${System.currentTimeMillis()}.jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                photoFile
+            )
+            tempPhotoUri = uri
+            takePictureLauncher.launch(uri)
+        } else {
+            Toast.makeText(context, "Permiso de cámara denegado", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun launchCameraForEvidence() {
+        val permissionCheck = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.CAMERA
+        )
+        if (permissionCheck == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            val photoFile = java.io.File(context.cacheDir, "evidence_photo_${System.currentTimeMillis()}.jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                photoFile
+            )
+            tempPhotoUri = uri
+            takePictureLauncher.launch(uri)
+        } else {
+            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -192,34 +273,40 @@ fun EnCursoTab(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
 
-                            Column {
-                                Text(
-                                    text = stringResource(R.string.evidence_section_title),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = stringResource(R.string.evidence_section_subtitle),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                        Column {
+                            Text(
+                                text = stringResource(R.string.evidence_section_title),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = stringResource(R.string.evidence_section_subtitle),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
 
-                            Button(
-                                onClick = {
-                                    val activity = context as? MainActivity
-                                    activity?.launchImagePicker { uri ->
-                                        uri?.let {
-                                            testRepository.agregarEvidencia(inscripcion.id, it.toString())
-                                        }
-                                    }
-                                },
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Button(
+                            onClick = { showPhotoPicker = true },
+                            enabled = !isUploadingEvidence,
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            if (isUploadingEvidence) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Subiendo...", fontSize = 12.sp)
+                            } else {
                                 Icon(Icons.Default.AddAPhoto, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(stringResource(R.string.btn_upload_media), fontSize = 12.sp)
                             }
+                        }
 
                         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
@@ -262,23 +349,18 @@ fun EnCursoTab(
 
         Spacer(modifier = Modifier.height(24.dp))
     }
+
+    if (showPhotoPicker) {
+        PhotoPickerDialog(
+            onDismissRequest = { showPhotoPicker = false },
+            onSelectCamera = { launchCameraForEvidence() },
+            onSelectGallery = { galleryLauncher.launch("image/*") }
+        )
+    }
 }
 
 @Composable
 fun EvidenceImageThumbnail(uriString: String) {
-    val context = LocalContext.current
-    val bitmapState = remember(uriString) {
-        try {
-            val uri = Uri.parse(uriString)
-            val inputStream = context.contentResolver.openInputStream(uri)
-            val bitmap = BitmapFactory.decodeStream(inputStream)
-            inputStream?.close()
-            bitmap?.asImageBitmap()
-        } catch (e: Exception) {
-            null
-        }
-    }
-
     Card(
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.size(90.dp),
@@ -290,22 +372,12 @@ fun EvidenceImageThumbnail(uriString: String) {
                 .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
-            val bitmap = bitmapState
-            if (bitmap != null) {
-                Image(
-                    bitmap = bitmap,
-                    contentDescription = "Evidencia Subida",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Default.Photo,
-                    contentDescription = "Evidencia",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(36.dp)
-                )
-            }
+            AsyncImage(
+                model = uriString,
+                contentDescription = "Evidencia Subida",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }

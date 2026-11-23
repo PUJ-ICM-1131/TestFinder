@@ -69,6 +69,8 @@ import com.example.proyecto.ui.components.NotificationHelper
 @Composable
 fun ChatsTab(
     chatRepository: ChatRepository,
+    currentUserId: String = "u1",
+    currentUserName: String = "Yo",
     selectedChatId: String? = null,
     onChatClosed: () -> Unit = {}
 ) {
@@ -120,9 +122,9 @@ fun ChatsTab(
 
     LaunchedEffect(totalMessages) {
         if (lastKnownMessageCount > 0 && totalMessages > lastKnownMessageCount) {
-            val currentUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "u1"
+            val currentUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: currentUserId
             val latestIncomingMessage = chats.flatMap { it.mensajes }
-                .filter { it.emisorId != currentUid && it.emisorId != "u1" }
+                .filter { it.emisorId != currentUid && it.emisorId != currentUserId && it.emisorId != "u1" }
                 .maxByOrNull { it.timestamp }
 
             if (latestIncomingMessage != null && (System.currentTimeMillis() - latestIncomingMessage.timestamp < 10000L)) {
@@ -150,8 +152,9 @@ fun ChatsTab(
     if (activeChat != null) {
         ChatConversationScreen(
             chat = activeChat,
+            currentUserId = currentUserId,
             onSendMessage = { texto ->
-                chatRepository.enviarMensaje(activeChat.id, texto, "u1", "Yo")
+                chatRepository.enviarMensaje(activeChat.id, texto, currentUserId, currentUserName)
             },
             onBack = {
                 activeChatId = null
@@ -463,6 +466,7 @@ fun ChatItemRow(
 @Composable
 fun ChatConversationScreen(
     chat: Chat,
+    currentUserId: String = "u1",
     onSendMessage: (String) -> Unit,
     onBack: () -> Unit
 ) {
@@ -527,9 +531,9 @@ fun ChatConversationScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                val currentUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "u1"
+                val currentUid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
                 items(chat.mensajes) { mensaje ->
-                    val esMio = (mensaje.emisorId == currentUid || mensaje.emisorId == "u1")
+                    val esMio = (mensaje.emisorId == currentUserId || (currentUid.isNotEmpty() && mensaje.emisorId == currentUid) || mensaje.emisorId == "u1")
                     Box(
                         modifier = Modifier.fillMaxWidth(),
                         contentAlignment = if (esMio) Alignment.CenterEnd else Alignment.CenterStart

@@ -67,6 +67,9 @@ fun rememberUserCoordinates(): UserCoordinates? {
                 val location = client.getCurrentLocation(
                     Priority.PRIORITY_HIGH_ACCURACY,
                     null
+                ).await() ?: client.getCurrentLocation(
+                    Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                    null
                 ).await()
 
                 if (location != null) {
@@ -74,6 +77,14 @@ fun rememberUserCoordinates(): UserCoordinates? {
                         latitude = location.latitude,
                         longitude = location.longitude
                     )
+                } else {
+                    val lastLoc = client.lastLocation.await()
+                    if (lastLoc != null) {
+                        coordinates = UserCoordinates(
+                            latitude = lastLoc.latitude,
+                            longitude = lastLoc.longitude
+                        )
+                    }
                 }
             } catch (_: Exception) {
                 coordinates = null

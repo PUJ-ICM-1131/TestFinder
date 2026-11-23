@@ -74,8 +74,10 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptor
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapType
@@ -134,8 +136,10 @@ fun MapScreen(
     var targetUserForDialog by remember { mutableStateOf<Amigo?>(null) }
 
     val amigos by chatRepository.amigos.collectAsState()
-    val onlineUsers by locationRepository.getOnlineUsers().collectAsState(initial = emptyList())
 
+    val onlineUsersFlow = remember(locationRepository) { locationRepository.getOnlineUsers() }
+    val onlineUsers by onlineUsersFlow.collectAsState(initial = emptyList())
+    
     val todosLosTests by testRepository.todosLosTests.collectAsState()
     val test = todosLosTests.find { it.id == testId } ?: todosLosTests.firstOrNull()
 
@@ -163,13 +167,36 @@ fun MapScreen(
                     currentUserLocation = latLng
                 }
             }
+            try {
+                fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                    .addOnSuccessListener { location ->
+                        if (location != null) {
+                            val latLng = LatLng(location.latitude, location.longitude)
+                            currentUserLocation = latLng
+                            if (isConnected) {
+                                scope.launch {
+                                    locationRepository.updateLocation(
+                                        uid = currentUid,
+                                        name = currentName,
+                                        email = currentEmail,
+                                        lat = location.latitude,
+                                        lng = location.longitude,
+                                        photoUrl = currentPhotoUrl
+                                    )
+                                }
+                            }
+                        }
+                    }
+            } catch (_: Exception) {
+            }
         }
     }
 
     val locationCallback = remember {
         object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { location ->
+                val location = result.lastLocation ?: result.locations.lastOrNull()
+                if (location != null) {
                     val latLng = LatLng(location.latitude, location.longitude)
                     currentUserLocation = latLng
                     if (isConnected) {
@@ -201,28 +228,10 @@ fun MapScreen(
         }
     }
 
-    LaunchedEffect(hasLocationPermission) {
-        if (hasLocationPermission) {
-            fetchInitialLocation()
-        }
-    }
-
-    // Auto-center camera on user location when first obtained
-    LaunchedEffect(currentUserLocation) {
-        currentUserLocation?.let { location ->
-            if (!hasCenteredCamera) {
-                cameraPositionState.animate(
-                    CameraUpdateFactory.newLatLngZoom(location, 15f)
-                )
-                hasCenteredCamera = true
-            }
-        }
-    }
-
     @SuppressLint("MissingPermission")
     fun startLocationUpdates() {
         if (hasLocationPermission) {
-            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000L)
+            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 3000L)
                 .setMinUpdateIntervalMillis(1500L)
                 .build()
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
@@ -233,8 +242,75 @@ fun MapScreen(
         fusedLocationClient.removeLocationUpdates(locationCallback)
     }
 
-    DisposableEffect(isConnected) {
-        if (isConnected) {
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        } else {
+            fetchInitialLocation()
+        }
+    }
+
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission) {
+            fetchInitialLocation()
+            startLocationUpdates()
+        }
+    }
+
+    // Auto-fit camera to enclose current user, test destination and all online users so everyone is visible
+    LaunchedEffect(currentUserLocation, onlineUsers) {
+        if (!hasCenteredCamera && onlineUsers.isNotEmpty()) {
+            try {
+                val builder = LatLngBounds.builder()
+                var count = 0
+
+                currentUserLocation?.let {
+                    builder.include(it)
+                    count++
+                }
+                builder.include(destLatLng)
+                count++
+
+                onlineUsers.filter { user ->
+                    user.isConnected && user.uid != currentUid
+                }.forEach { user ->
+                    val lat = user.latitude
+                    val lng = user.longitude
+                    if (lat != null && lng != null) {
+                        builder.include(LatLng(lat, lng))
+                        count++
+                    }
+                }
+
+                if (count > 0) {
+                    val bounds = builder.build()
+                    val cameraUpdate = CameraUpdateFactory.newLatLngBounds(bounds, 120)
+                    cameraPositionState.animate(cameraUpdate)
+                    hasCenteredCamera = true
+                }
+            } catch (_: Exception) {
+            }
+        } else if (!hasCenteredCamera && currentUserLocation != null) {
+            try {
+                val builder = LatLngBounds.builder()
+                builder.include(currentUserLocation!!)
+                builder.include(destLatLng)
+                val bounds = builder.build()
+                val cameraUpdate = CameraUpdateFactory.newLatLngBounds(bounds, 140)
+                cameraPositionState.animate(cameraUpdate)
+                hasCenteredCamera = true
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    DisposableEffect(isConnected, hasLocationPermission) {
+        if (isConnected && hasLocationPermission) {
             startLocationUpdates()
             scope.launch { locationRepository.setConnectedState(currentUid, true) }
         } else {
@@ -243,7 +319,6 @@ fun MapScreen(
         }
         onDispose {
             stopLocationUpdates()
-            scope.launch { locationRepository.setConnectedState(currentUid, false) }
         }
     }
 
@@ -278,17 +353,15 @@ fun MapScreen(
     val fallbackTesterText = stringResource(R.string.user_tester_fallback)
 
     LaunchedEffect(onlineUsers, fallbackUserText) {
-        onlineUsers.forEach { user ->
-            if (user.uid != currentUid) {
-                scope.launch {
-                    val descriptor = CustomMarkerHelper.createCustomMarkerBitmap(
-                        context = context,
-                        imageUrl = user.photoUrl,
-                        userName = user.name.ifEmpty { fallbackUserText },
-                        isCurrentUser = false
-                    )
-                    markerIcons[user.uid] = descriptor
-                }
+        onlineUsers.filter { it.isConnected && it.uid != currentUid }.forEach { user ->
+            scope.launch {
+                val descriptor = CustomMarkerHelper.createCustomMarkerBitmap(
+                    context = context,
+                    imageUrl = user.photoUrl,
+                    userName = user.name.ifEmpty { fallbackUserText },
+                    isCurrentUser = false
+                )
+                markerIcons[user.uid] = descriptor
             }
         }
     }
@@ -296,7 +369,7 @@ fun MapScreen(
     // Fetch street-following routes between current user and other online users
     LaunchedEffect(currentUserLocation, onlineUsers) {
         val myLoc = currentUserLocation ?: return@LaunchedEffect
-        onlineUsers.filter { it.uid != currentUid }.forEach { user ->
+        onlineUsers.filter { it.isConnected && it.uid != currentUid }.forEach { user ->
             val userLat = user.latitude
             val userLng = user.longitude
             if (userLat != null && userLng != null) {
@@ -403,7 +476,9 @@ fun MapScreen(
                 )
 
                 // Render ALL real-time online users from Firestore and connect street routes with current user
-                onlineUsers.filter { it.uid != currentUid }.forEach { user ->
+                onlineUsers.filter { user ->
+                    user.isConnected && user.uid != currentUid
+                }.forEach { user ->
                     val lat = user.latitude
                     val lng = user.longitude
 
@@ -428,7 +503,7 @@ fun MapScreen(
                             state = userMarkerState,
                             title = user.name.ifEmpty { fallbackTesterText },
                             snippet = stringResource(R.string.switch_connected),
-                            icon = markerIcons[user.uid],
+                            icon = markerIcons[user.uid] ?: BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE),
                             onClick = {
                                 targetUserForDialog = Amigo(
                                     id = user.uid,

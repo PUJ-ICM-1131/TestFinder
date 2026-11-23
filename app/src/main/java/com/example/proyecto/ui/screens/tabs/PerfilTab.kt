@@ -121,18 +121,16 @@ fun PerfilTab(
         }
     }
 
-    val cameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: android.graphics.Bitmap? ->
-        bitmap?.let { b ->
+    var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
+
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        if (success && tempPhotoUri != null) {
             scope.launch {
                 try {
                     isUploadingPhoto = true
-                    val file = java.io.File(context.cacheDir, "temp_profile_${System.currentTimeMillis()}.jpg")
-                    file.outputStream().use { out ->
-                        b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
-                    }
-                    val secureUrl = CloudinaryUploader.uploadImage(context, Uri.fromFile(file))
+                    val secureUrl = CloudinaryUploader.uploadImage(context, tempPhotoUri!!)
                     fotoUrl = secureUrl
                     val usuarioActualizado = usuario.copy(
                         nombre = nombre,
@@ -152,6 +150,42 @@ fun PerfilTab(
                     isUploadingPhoto = false
                 }
             }
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            val photoFile = java.io.File(context.cacheDir, "camera_photo_${System.currentTimeMillis()}.jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                photoFile
+            )
+            tempPhotoUri = uri
+            takePictureLauncher.launch(uri)
+        } else {
+            android.widget.Toast.makeText(context, "Permiso de cámara denegado", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun launchCamera() {
+        val permissionCheck = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.CAMERA
+        )
+        if (permissionCheck == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            val photoFile = java.io.File(context.cacheDir, "camera_photo_${System.currentTimeMillis()}.jpg")
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                photoFile
+            )
+            tempPhotoUri = uri
+            takePictureLauncher.launch(uri)
+        } else {
+            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
         }
     }
 
@@ -385,7 +419,7 @@ fun PerfilTab(
     if (showPhotoDialog) {
         PhotoPickerDialog(
             onDismissRequest = { showPhotoDialog = false },
-            onSelectCamera = { cameraLauncher.launch(null) },
+            onSelectCamera = { launchCamera() },
             onSelectGallery = { galleryLauncher.launch("image/*") }
         )
     }

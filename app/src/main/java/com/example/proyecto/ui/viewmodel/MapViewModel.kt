@@ -56,7 +56,7 @@ class MapViewModel(
         viewModelScope.launch {
             locationRepository.getOnlineUsers().collect { users ->
                 val myUid = currentUserId
-                val others = users.filter { it.uid != myUid }
+                val others = users.filter { it.isConnected && it.uid != myUid }
                 val myUser = users.firstOrNull { it.uid == myUid }
 
                 _uiState.update { state ->
