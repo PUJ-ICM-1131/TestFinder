@@ -103,7 +103,7 @@ fun LoginScreen(
         }
     }
 
-    val requerirAutenticacionBiometrica = false
+    val requerirAutenticacionBiometrica = true
 
     val triggerBiometricAuth = {
         if (!requerirAutenticacionBiometrica) {
